@@ -17,7 +17,7 @@ Manages a PostgreSQL database instance in Dokploy.
 
 ### Required
 
-- `app_name` (String) Application name prefix for the PostgreSQL instance. Dokploy will append a random suffix.
+- `app_name_prefix` (String) Application name prefix for the PostgreSQL instance. Dokploy will append a random suffix to create the final app_name.
 - `database_name` (String) Name of the database to create.
 - `database_password` (String, Sensitive) Password for the database user.
 - `database_user` (String) Database user name.
@@ -29,6 +29,7 @@ Manages a PostgreSQL database instance in Dokploy.
 - `command` (String) Custom command to run in the container.
 - `cpu_limit` (String) CPU limit for the container.
 - `cpu_reservation` (String) CPU reservation for the container.
+- `deploy_on_create` (Boolean) Trigger a deployment after creating the PostgreSQL instance.
 - `description` (String) Description of the PostgreSQL instance.
 - `docker_image` (String) Docker image to use (defaults to postgres:15).
 - `env` (String) Environment variables for the container.
@@ -39,6 +40,15 @@ Manages a PostgreSQL database instance in Dokploy.
 - `server_id` (String) ID of the server to deploy the PostgreSQL instance on.
 
 ### Read-Only
+- `app_name` (String) The actual application name used by Dokploy (includes server-generated suffix).
 
 - `application_status` (String) Current status of the PostgreSQL application (idle, running, done, error).
 - `id` (String) Unique identifier for the PostgreSQL instance.
+- `internal_port` (Number) Internal container port for PostgreSQL (always 5432 on Dokploy).
+
+## Notes
+
+- The `app_name_prefix` you provide will have a random suffix appended by Dokploy to create the final `app_name`.
+- The computed `app_name` attribute contains the full name with the server-generated suffix. Use this when referencing the instance from other services.
+- Changing `app_name_prefix` will force recreation of the instance.
+- When importing, set `app_name_prefix` in your configuration (it cannot be determined from the imported state).

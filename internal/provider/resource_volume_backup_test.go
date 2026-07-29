@@ -126,7 +126,7 @@ resource "dokploy_environment" "test" {
 
 resource "dokploy_postgres" "test" {
   name              = "%s"
-  app_name          = "%s"
+  app_name_prefix   = "%s"
   database_name     = "%s"
   database_user     = "%s"
   database_password = "test_password_123"
@@ -177,7 +177,7 @@ resource "dokploy_environment" "test" {
 
 resource "dokploy_postgres" "test" {
   name              = "%s"
-  app_name          = "%s"
+  app_name_prefix   = "%s"
   database_name     = "%s"
   database_user     = "%s"
   database_password = "test_password_123"
@@ -277,7 +277,7 @@ resource "dokploy_environment" "test_ds" {
 
 resource "dokploy_postgres" "test_ds" {
   name              = "%s"
-  app_name          = "%s"
+  app_name_prefix   = "%s"
   database_name     = "%s"
   database_user     = "%s"
   database_password = "test_password_123"

@@ -29,6 +29,7 @@ type PostgresResource struct {
 type PostgresResourceModel struct {
 	ID                types.String `tfsdk:"id"`
 	Name              types.String `tfsdk:"name"`
+	AppNamePrefix     types.String `tfsdk:"app_name_prefix"`
 	AppName           types.String `tfsdk:"app_name"`
 	Description       types.String `tfsdk:"description"`
 	DatabaseName      types.String `tfsdk:"database_name"`
@@ -42,10 +43,12 @@ type PostgresResourceModel struct {
 	CPUReservation    types.String `tfsdk:"cpu_reservation"`
 	CPULimit          types.String `tfsdk:"cpu_limit"`
 	ExternalPort      types.Int64  `tfsdk:"external_port"`
+	InternalPort      types.Int64  `tfsdk:"internal_port"`
 	EnvironmentID     types.String `tfsdk:"environment_id"`
 	ApplicationStatus types.String `tfsdk:"application_status"`
 	Replicas          types.Int64  `tfsdk:"replicas"`
 	ServerID          types.String `tfsdk:"server_id"`
+	DeployOnCreate    types.Bool   `tfsdk:"deploy_on_create"`
 }
 
 func (r *PostgresResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -67,11 +70,18 @@ func (r *PostgresResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Required:    true,
 				Description: "Name of the PostgreSQL instance.",
 			},
-			"app_name": schema.StringAttribute{
+			"app_name_prefix": schema.StringAttribute{
 				Required:    true,
-				Description: "Application name prefix for the PostgreSQL instance. Dokploy will append a random suffix.",
+				Description: "Application name prefix for the PostgreSQL instance. Dokploy will append a random suffix to create the final app_name.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"app_name": schema.StringAttribute{
+				Computed:    true,
+				Description: "The actual application name used by Dokploy (includes server-generated suffix).",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"description": schema.StringAttribute{
@@ -133,6 +143,13 @@ func (r *PostgresResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Optional:    true,
 				Description: "External port to expose the PostgreSQL instance.",
 			},
+			"internal_port": schema.Int64Attribute{
+				Computed:    true,
+				Description: "Internal container port for PostgreSQL (always 5432 on Dokploy).",
+				PlanModifiers: []planmodifier.Int64{
+					int64planmodifier.UseStateForUnknown(),
+				},
+			},
 			"environment_id": schema.StringAttribute{
 				Required:    true,
 				Description: "ID of the environment to deploy the PostgreSQL instance in.",
@@ -162,6 +179,10 @@ func (r *PostgresResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
+			"deploy_on_create": schema.BoolAttribute{
+				Optional:    true,
+				Description: "Trigger a deployment after creating the PostgreSQL instance.",
+			},
 		},
 	}
 }
@@ -188,7 +209,7 @@ func (r *PostgresResource) Create(ctx context.Context, req resource.CreateReques
 
 	postgres := client.Postgres{
 		Name:             plan.Name.ValueString(),
-		AppName:          plan.AppName.ValueString(),
+		AppName:          plan.AppNamePrefix.ValueString(),
 		Description:      plan.Description.ValueString(),
 		DatabaseName:     plan.DatabaseName.ValueString(),
 		DatabaseUser:     plan.DatabaseUser.ValueString(),
@@ -243,6 +264,13 @@ func (r *PostgresResource) Create(ctx context.Context, req resource.CreateReques
 	// Set state from created resource
 	r.mapPostgresToState(&plan, createdPostgres)
 
+	if !plan.DeployOnCreate.IsNull() && plan.DeployOnCreate.ValueBool() {
+		err := r.client.DeployPostgres(createdPostgres.PostgresID)
+		if err != nil {
+			resp.Diagnostics.AddWarning("Deployment Trigger Failed", fmt.Sprintf("PostgreSQL instance created but deployment failed to trigger: %s", err.Error()))
+		}
+	}
+
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
 }
@@ -265,13 +293,7 @@ func (r *PostgresResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 
-	// Preserve app_name from state (user-provided prefix)
-	appNamePrefix := state.AppName
 	r.mapPostgresToState(&state, postgres)
-	// Restore the user-provided app_name prefix
-	if !appNamePrefix.IsNull() && !appNamePrefix.IsUnknown() {
-		state.AppName = appNamePrefix
-	}
 
 	diags = resp.State.Set(ctx, state)
 	resp.Diagnostics.Append(diags...)
@@ -314,10 +336,7 @@ func (r *PostgresResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
-	// Preserve app_name from plan (user-provided prefix)
-	appNamePrefix := plan.AppName
 	r.mapPostgresToState(&plan, updatedPostgres)
-	plan.AppName = appNamePrefix
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
@@ -387,6 +406,12 @@ func (r *PostgresResource) mapPostgresToState(state *PostgresResourceModel, post
 	}
 	if !state.ExternalPort.IsNull() || postgres.ExternalPort > 0 {
 		state.ExternalPort = types.Int64Value(int64(postgres.ExternalPort))
+	}
+	if postgres.InternalPort > 0 {
+		state.InternalPort = types.Int64Value(int64(postgres.InternalPort))
+	} else {
+		// Dokploy Postgres listens on 5432 internally; the API does not always return it.
+		state.InternalPort = types.Int64Value(5432)
 	}
 	if !state.ServerID.IsNull() || postgres.ServerID != "" {
 		state.ServerID = types.StringValue(postgres.ServerID)

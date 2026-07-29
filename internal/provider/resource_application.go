@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -22,6 +23,7 @@ import (
 
 var _ resource.Resource = &ApplicationResource{}
 var _ resource.ResourceWithImportState = &ApplicationResource{}
+var _ resource.ResourceWithValidateConfig = &ApplicationResource{}
 
 func NewApplicationResource() resource.Resource {
 	return &ApplicationResource{}
@@ -35,6 +37,7 @@ type ApplicationResourceModel struct {
 	ID            types.String `tfsdk:"id"`
 	EnvironmentID types.String `tfsdk:"environment_id"`
 	Name          types.String `tfsdk:"name"`
+	AppNamePrefix types.String `tfsdk:"app_name_prefix"`
 	AppName       types.String `tfsdk:"app_name"`
 	Description   types.String `tfsdk:"description"`
 	ServerID      types.String `tfsdk:"server_id"`
@@ -195,10 +198,16 @@ func (r *ApplicationResource) Schema(_ context.Context, _ resource.SchemaRequest
 				Required:    true,
 				Description: "The display name of the application.",
 			},
-			"app_name": schema.StringAttribute{
+			"app_name_prefix": schema.StringAttribute{
 				Optional:    true,
+				Description: "Application name prefix. Dokploy will append a random suffix to create the final app_name. Auto-generated if not specified.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"app_name": schema.StringAttribute{
 				Computed:    true,
-				Description: "The app name used for Docker container naming. Auto-generated if not specified.",
+				Description: "The actual application name used by Dokploy for Docker container naming (includes server-generated suffix).",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -423,18 +432,22 @@ func (r *ApplicationResource) Schema(_ context.Context, _ resource.SchemaRequest
 			"dockerfile_path": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "Path to the Dockerfile (relative to build path).",
-				Default:     stringdefault.StaticString("./Dockerfile"),
+				Description: "Path to the Dockerfile (relative to build path). Only valid when build_type is 'dockerfile'.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"docker_context_path": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "Docker build context path.",
-				Default:     stringdefault.StaticString("."),
+				Description: "Docker build context path. Only valid when build_type is 'dockerfile'.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"docker_build_stage": schema.StringAttribute{
 				Optional:    true,
-				Description: "Target stage for multi-stage Docker builds.",
+				Description: "Target stage for multi-stage Docker builds. Only valid when build_type is 'dockerfile'.",
 			},
 			"publish_directory": schema.StringAttribute{
 				Optional:    true,
@@ -679,10 +692,18 @@ func (r *ApplicationResource) Schema(_ context.Context, _ resource.SchemaRequest
 				Description: "Endpoint specification for Docker Swarm mode (JSON format).",
 			},
 
-			// Traefik configuration
+			// Traefik configuration — often written by Dokploy itself (e.g. via
+			// dokploy_domain). Optional+Computed so omitting it in HCL keeps the
+			// API value; set explicitly (including "") only when managing it here.
 			"traefik_config": schema.StringAttribute{
-				Optional:    true,
-				Description: "Custom Traefik configuration for the application. This allows you to define custom routing rules, middleware, and other Traefik-specific settings.",
+				Optional: true,
+				Computed: true,
+				Description: "Traefik configuration for the application. Often managed by Dokploy " +
+					"(for example when domains are attached). Omit this attribute to leave the " +
+					"API value unchanged; set it only to push a custom config, or \"\" to clear.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 		},
 	}
@@ -698,6 +719,47 @@ func (r *ApplicationResource) Configure(_ context.Context, req resource.Configur
 		return
 	}
 	r.client = client
+}
+
+func (r *ApplicationResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var config ApplicationResourceModel
+	diags := req.Config.Get(ctx, &config)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	buildType := config.BuildType.ValueString()
+	if config.BuildType.IsNull() || config.BuildType.IsUnknown() {
+		// Schema default is nixpacks when unset.
+		buildType = "nixpacks"
+	}
+
+	if buildType == "dockerfile" {
+		return
+	}
+
+	if !config.DockerfilePath.IsNull() && !config.DockerfilePath.IsUnknown() {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("dockerfile_path"),
+			"Invalid dockerfile_path",
+			"dockerfile_path can only be set when build_type is \"dockerfile\".",
+		)
+	}
+	if !config.DockerContextPath.IsNull() && !config.DockerContextPath.IsUnknown() {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("docker_context_path"),
+			"Invalid docker_context_path",
+			"docker_context_path can only be set when build_type is \"dockerfile\".",
+		)
+	}
+	if !config.DockerBuildStage.IsNull() && !config.DockerBuildStage.IsUnknown() {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("docker_build_stage"),
+			"Invalid docker_build_stage",
+			"docker_build_stage can only be set when build_type is \"dockerfile\".",
+		)
+	}
 }
 
 func (r *ApplicationResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -716,10 +778,12 @@ func (r *ApplicationResource) Create(ctx context.Context, req resource.CreateReq
 	// 1. Create application with minimal required fields
 	app := client.Application{
 		Name:          plan.Name.ValueString(),
-		AppName:       plan.AppName.ValueString(),
 		Description:   plan.Description.ValueString(),
 		EnvironmentID: plan.EnvironmentID.ValueString(),
 		ServerID:      plan.ServerID.ValueString(),
+	}
+	if !plan.AppNamePrefix.IsNull() && !plan.AppNamePrefix.IsUnknown() {
+		app.AppName = plan.AppNamePrefix.ValueString()
 	}
 
 	createdApp, err := r.client.CreateApplication(app)
@@ -759,7 +823,7 @@ func (r *ApplicationResource) Create(ctx context.Context, req resource.CreateReq
 		return
 	}
 
-	// 6. Save Traefik config if provided
+	// 6. Save Traefik config only when explicitly set in config
 	if !plan.TraefikConfig.IsNull() && !plan.TraefikConfig.IsUnknown() && plan.TraefikConfig.ValueString() != "" {
 		if err := r.client.UpdateTraefikConfig(createdApp.ID, plan.TraefikConfig.ValueString()); err != nil {
 			resp.Diagnostics.AddError("Error saving Traefik config", err.Error())
@@ -777,14 +841,14 @@ func (r *ApplicationResource) Create(ctx context.Context, req resource.CreateReq
 	// Update plan with values from the API
 	updatePlanFromApplication(&plan, finalApp)
 
-	// Read traefik config if it was set
-	if !plan.TraefikConfig.IsNull() && !plan.TraefikConfig.IsUnknown() {
-		traefikConfig, err := r.client.ReadTraefikConfig(createdApp.ID)
-		if err != nil {
-			resp.Diagnostics.AddWarning("Error reading Traefik config", err.Error())
-		} else if traefikConfig != "" {
-			plan.TraefikConfig = types.StringValue(traefikConfig)
-		}
+	traefikConfig, err := r.client.ReadTraefikConfig(createdApp.ID)
+	if err != nil {
+		resp.Diagnostics.AddWarning("Error reading Traefik config", err.Error())
+		plan.TraefikConfig = types.StringNull()
+	} else if traefikConfig != "" {
+		plan.TraefikConfig = types.StringValue(traefikConfig)
+	} else {
+		plan.TraefikConfig = types.StringNull()
 	}
 
 	// 8. Deploy if requested
@@ -885,17 +949,21 @@ func (r *ApplicationResource) Update(ctx context.Context, req resource.UpdateReq
 		return
 	}
 
-	// 5. Update Traefik config if provided
+	// 5. Traefik config: only push when explicitly set in HCL.
+	// Omitting the attribute (Optional+Computed) preserves the API/state value
+	// via UseStateForUnknown — do not treat null as "clear".
 	if !plan.TraefikConfig.IsNull() && !plan.TraefikConfig.IsUnknown() {
-		if err := r.client.UpdateTraefikConfig(appID, plan.TraefikConfig.ValueString()); err != nil {
-			resp.Diagnostics.AddError("Error updating Traefik config", err.Error())
-			return
-		}
-	} else if !state.TraefikConfig.IsNull() && (plan.TraefikConfig.IsNull() || plan.TraefikConfig.ValueString() == "") {
-		// Clear traefik config if it was set before but is now empty/null
-		if err := r.client.UpdateTraefikConfig(appID, ""); err != nil {
-			resp.Diagnostics.AddError("Error clearing Traefik config", err.Error())
-			return
+		desired := plan.TraefikConfig.ValueString()
+		previous := state.TraefikConfig.ValueString()
+		if desired != previous {
+			if err := r.client.UpdateTraefikConfig(appID, desired); err != nil {
+				if desired == "" {
+					resp.Diagnostics.AddError("Error clearing Traefik config", err.Error())
+				} else {
+					resp.Diagnostics.AddError("Error updating Traefik config", err.Error())
+				}
+				return
+			}
 		}
 	}
 
@@ -933,13 +1001,23 @@ func (r *ApplicationResource) Delete(ctx context.Context, req resource.DeleteReq
 
 	err := r.client.DeleteApplication(state.ID.ValueString())
 	if err != nil {
+		if errors.Is(err, client.ErrNotFound) {
+			return
+		}
 		errStr := strings.ToLower(err.Error())
 		if strings.Contains(errStr, "not found") || strings.Contains(errStr, "not_found") || strings.Contains(errStr, "404") {
-			// Resource already deleted, that's fine
 			return
 		}
 		resp.Diagnostics.AddError("Error deleting application", err.Error())
 		return
+	}
+
+	// Confirm Dokploy actually removed it (wrong endpoint used to 404 and look "successful").
+	if _, getErr := r.client.GetApplication(state.ID.ValueString()); getErr == nil {
+		resp.Diagnostics.AddError(
+			"Error deleting application",
+			fmt.Sprintf("application %s still exists in Dokploy after delete", state.ID.ValueString()),
+		)
 	}
 }
 
@@ -1131,12 +1209,21 @@ func (r *ApplicationResource) updateGeneralSettings(appID string, plan *Applicat
 }
 
 func (r *ApplicationResource) saveBuildType(appID string, plan *ApplicationResourceModel) error {
+	dockerfilePath := ""
+	dockerContextPath := ""
+	dockerBuildStage := ""
+	if plan.BuildType.ValueString() == "dockerfile" {
+		dockerfilePath = plan.DockerfilePath.ValueString()
+		dockerContextPath = plan.DockerContextPath.ValueString()
+		dockerBuildStage = plan.DockerBuildStage.ValueString()
+	}
+
 	return r.client.SaveBuildType(
 		appID,
 		plan.BuildType.ValueString(),
-		plan.DockerfilePath.ValueString(),
-		plan.DockerContextPath.ValueString(),
-		plan.DockerBuildStage.ValueString(),
+		dockerfilePath,
+		dockerContextPath,
+		dockerBuildStage,
 		plan.PublishDirectory.ValueString(),
 	)
 }
@@ -1288,11 +1375,23 @@ func updatePlanFromApplication(plan *ApplicationResourceModel, app *client.Appli
 	if app.BuildType != "" {
 		plan.BuildType = types.StringValue(app.BuildType)
 	}
-	if app.DockerfilePath != "" {
-		plan.DockerfilePath = types.StringValue(app.DockerfilePath)
-	}
-	if app.DockerContextPath != "" {
-		plan.DockerContextPath = types.StringValue(app.DockerContextPath)
+	if plan.BuildType.ValueString() == "dockerfile" {
+		if app.DockerfilePath != "" {
+			plan.DockerfilePath = types.StringValue(app.DockerfilePath)
+		} else if plan.DockerfilePath.IsUnknown() {
+			plan.DockerfilePath = types.StringNull()
+		}
+		if app.DockerContextPath != "" {
+			plan.DockerContextPath = types.StringValue(app.DockerContextPath)
+		} else if plan.DockerContextPath.IsUnknown() {
+			plan.DockerContextPath = types.StringNull()
+		}
+	} else {
+		plan.DockerfilePath = types.StringNull()
+		plan.DockerContextPath = types.StringNull()
+		if plan.DockerBuildStage.IsUnknown() {
+			plan.DockerBuildStage = types.StringNull()
+		}
 	}
 
 	// GitHub fields - populate both legacy and new field names
@@ -1691,14 +1790,20 @@ func readApplicationIntoState(state *ApplicationResourceModel, app *client.Appli
 	if app.BuildType != "" {
 		state.BuildType = types.StringValue(app.BuildType)
 	}
-	if app.DockerfilePath != "" {
-		state.DockerfilePath = types.StringValue(app.DockerfilePath)
-	}
-	if app.DockerContextPath != "" {
-		state.DockerContextPath = types.StringValue(app.DockerContextPath)
-	}
-	if app.DockerBuildStage != "" {
-		state.DockerBuildStage = types.StringValue(app.DockerBuildStage)
+	if state.BuildType.ValueString() == "dockerfile" {
+		if app.DockerfilePath != "" {
+			state.DockerfilePath = types.StringValue(app.DockerfilePath)
+		}
+		if app.DockerContextPath != "" {
+			state.DockerContextPath = types.StringValue(app.DockerContextPath)
+		}
+		if app.DockerBuildStage != "" {
+			state.DockerBuildStage = types.StringValue(app.DockerBuildStage)
+		}
+	} else {
+		state.DockerfilePath = types.StringNull()
+		state.DockerContextPath = types.StringNull()
+		state.DockerBuildStage = types.StringNull()
 	}
 	if app.PublishDirectory != "" {
 		state.PublishDirectory = types.StringValue(app.PublishDirectory)

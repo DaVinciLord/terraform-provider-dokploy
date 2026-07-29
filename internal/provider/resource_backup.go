@@ -339,16 +339,15 @@ func (r *BackupResource) Update(ctx context.Context, req resource.UpdateRequest,
 		KeepLatestCount: int(plan.KeepLatestCount.ValueInt64()),
 	}
 
-	// Set metadata if provided
+	metadataMap := make(map[string]string)
 	if !plan.Metadata.IsNull() && !plan.Metadata.IsUnknown() {
-		metadataMap := make(map[string]string)
 		diags = plan.Metadata.ElementsAs(ctx, &metadataMap, false)
 		resp.Diagnostics.Append(diags...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		backup.Metadata = metadataMap
 	}
+	backup.Metadata = metadataMap
 
 	// Set database type for the update API
 	if !plan.DatabaseType.IsNull() && plan.DatabaseType.ValueString() != "" {

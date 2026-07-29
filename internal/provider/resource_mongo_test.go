@@ -44,7 +44,7 @@ func TestAccMongoDBResource(t *testing.T) {
 				ResourceName:            "dokploy_mongo.test",
 				ImportState:             true,
 				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"database_password", "app_name"},
+				ImportStateVerifyIgnore: []string{"database_password", "app_name_prefix"},
 			},
 		},
 	})
@@ -69,7 +69,7 @@ resource "dokploy_environment" "test" {
 
 resource "dokploy_mongo" "test" {
   name              = "%s"
-  app_name          = "%s"
+  app_name_prefix   = "%s"
   database_user     = "%s"
   database_password = "test_mongo_password_123"
   environment_id    = dokploy_environment.test.id
@@ -96,7 +96,7 @@ resource "dokploy_environment" "test" {
 
 resource "dokploy_mongo" "test" {
   name              = "%s"
-  app_name          = "%s"
+  app_name_prefix   = "%s"
   database_user     = "%s"
   database_password = "test_mongo_password_123"
   environment_id    = dokploy_environment.test.id
@@ -150,7 +150,7 @@ resource "dokploy_environment" "test" {
 
 resource "dokploy_mongo" "test" {
   name              = "%s"
-  app_name          = "%s"
+  app_name_prefix   = "%s"
   database_user     = "%s"
   database_password = "test_mongo_password_123"
   environment_id    = dokploy_environment.test.id

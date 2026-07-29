@@ -34,6 +34,7 @@ type ComposeResourceModel struct {
 	ID            types.String `tfsdk:"id"`
 	EnvironmentID types.String `tfsdk:"environment_id"`
 	Name          types.String `tfsdk:"name"`
+	AppNamePrefix types.String `tfsdk:"app_name_prefix"`
 	AppName       types.String `tfsdk:"app_name"`
 	Description   types.String `tfsdk:"description"`
 	ServerID      types.String `tfsdk:"server_id"`
@@ -130,10 +131,16 @@ func (r *ComposeResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				Required:    true,
 				Description: "The display name of the compose stack.",
 			},
-			"app_name": schema.StringAttribute{
+			"app_name_prefix": schema.StringAttribute{
 				Optional:    true,
+				Description: "Application name prefix for Docker service naming. Dokploy will append a random suffix to create the final app_name. Auto-generated if not specified.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"app_name": schema.StringAttribute{
 				Computed:    true,
-				Description: "The app name used for Docker service naming. Auto-generated if not specified.",
+				Description: "The actual app name used for Docker service naming (includes server-generated suffix).",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -466,6 +473,9 @@ func (r *ComposeResource) Create(ctx context.Context, req resource.CreateRequest
 		IsolatedDeployment:        plan.IsolatedDeployment.ValueBool(),
 		IsolatedDeploymentsVolume: plan.IsolatedDeploymentsVolume.ValueBool(),
 		WatchPaths:                watchPaths,
+	}
+	if !plan.AppNamePrefix.IsNull() && !plan.AppNamePrefix.IsUnknown() {
+		comp.AppName = plan.AppNamePrefix.ValueString()
 	}
 
 	// GitHub fields

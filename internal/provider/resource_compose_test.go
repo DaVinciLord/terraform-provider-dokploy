@@ -58,7 +58,7 @@ services:
 				ResourceName:            "dokploy_compose.test",
 				ImportState:             true,
 				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"deploy_on_create", "branch", "trigger_type"}, // deploy_on_create is write-only; branch/trigger_type have API defaults that don't apply to raw source type in this test
+				ImportStateVerifyIgnore: []string{"deploy_on_create", "branch", "trigger_type", "app_name_prefix"}, // deploy_on_create is write-only; branch/trigger_type have API defaults that don't apply to raw source type in this test; app_name_prefix is config-only
 			},
 		},
 	})

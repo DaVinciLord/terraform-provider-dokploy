@@ -120,7 +120,7 @@ resource "dokploy_environment" "test" {
 
 resource "dokploy_postgres" "test" {
   name              = "%s"
-  app_name          = "%s"
+  app_name_prefix   = "%s"
   database_name     = "%s"
   database_user     = "%s"
   database_password = "test_password_123"

@@ -30,6 +30,7 @@ type MongoDBResource struct {
 type MongoDBResourceModel struct {
 	ID                types.String `tfsdk:"id"`
 	Name              types.String `tfsdk:"name"`
+	AppNamePrefix     types.String `tfsdk:"app_name_prefix"`
 	AppName           types.String `tfsdk:"app_name"`
 	Description       types.String `tfsdk:"description"`
 	DatabaseUser      types.String `tfsdk:"database_user"`
@@ -68,11 +69,18 @@ func (r *MongoDBResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				Required:    true,
 				Description: "Name of the MongoDB instance.",
 			},
-			"app_name": schema.StringAttribute{
+			"app_name_prefix": schema.StringAttribute{
 				Required:    true,
-				Description: "Application name prefix for the MongoDB instance. Dokploy will append a random suffix.",
+				Description: "Application name prefix for the MongoDB instance. Dokploy will append a random suffix to create the final app_name.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"app_name": schema.StringAttribute{
+				Computed:    true,
+				Description: "The actual application name used by Dokploy (includes server-generated suffix).",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"description": schema.StringAttribute{
@@ -188,7 +196,7 @@ func (r *MongoDBResource) Create(ctx context.Context, req resource.CreateRequest
 
 	mongo := client.MongoDB{
 		Name:             plan.Name.ValueString(),
-		AppName:          plan.AppName.ValueString(),
+		AppName:          plan.AppNamePrefix.ValueString(),
 		Description:      plan.Description.ValueString(),
 		DatabaseUser:     plan.DatabaseUser.ValueString(),
 		DatabasePassword: plan.DatabasePassword.ValueString(),
@@ -265,13 +273,7 @@ func (r *MongoDBResource) Read(ctx context.Context, req resource.ReadRequest, re
 		return
 	}
 
-	// Preserve app_name from state (user-provided prefix)
-	appNamePrefix := state.AppName
 	r.mapMongoDBToState(&state, mongo)
-	// Restore the user-provided app_name prefix
-	if !appNamePrefix.IsNull() && !appNamePrefix.IsUnknown() {
-		state.AppName = appNamePrefix
-	}
 
 	diags = resp.State.Set(ctx, state)
 	resp.Diagnostics.Append(diags...)
@@ -315,10 +317,7 @@ func (r *MongoDBResource) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 
-	// Preserve app_name from plan (user-provided prefix)
-	appNamePrefix := plan.AppName
 	r.mapMongoDBToState(&plan, updatedMongo)
-	plan.AppName = appNamePrefix
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)

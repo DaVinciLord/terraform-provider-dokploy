@@ -29,6 +29,7 @@ type MySQLResource struct {
 type MySQLResourceModel struct {
 	ID                   types.String `tfsdk:"id"`
 	Name                 types.String `tfsdk:"name"`
+	AppNamePrefix        types.String `tfsdk:"app_name_prefix"`
 	AppName              types.String `tfsdk:"app_name"`
 	Description          types.String `tfsdk:"description"`
 	DatabaseName         types.String `tfsdk:"database_name"`
@@ -68,11 +69,18 @@ func (r *MySQLResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 				Required:    true,
 				Description: "Name of the MySQL instance.",
 			},
-			"app_name": schema.StringAttribute{
+			"app_name_prefix": schema.StringAttribute{
 				Required:    true,
-				Description: "Application name prefix for the MySQL instance. Dokploy will append a random suffix.",
+				Description: "Application name prefix for the MySQL instance. Dokploy will append a random suffix to create the final app_name.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"app_name": schema.StringAttribute{
+				Computed:    true,
+				Description: "The actual application name used by Dokploy (includes server-generated suffix).",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"description": schema.StringAttribute{
@@ -194,7 +202,7 @@ func (r *MySQLResource) Create(ctx context.Context, req resource.CreateRequest, 
 
 	mysql := client.MySQL{
 		Name:                 plan.Name.ValueString(),
-		AppName:              plan.AppName.ValueString(),
+		AppName:              plan.AppNamePrefix.ValueString(),
 		Description:          plan.Description.ValueString(),
 		DatabaseName:         plan.DatabaseName.ValueString(),
 		DatabaseUser:         plan.DatabaseUser.ValueString(),
@@ -272,13 +280,7 @@ func (r *MySQLResource) Read(ctx context.Context, req resource.ReadRequest, resp
 		return
 	}
 
-	// Preserve app_name from state (user-provided prefix)
-	appNamePrefix := state.AppName
 	r.mapMySQLToState(&state, mysql)
-	// Restore the user-provided app_name prefix
-	if !appNamePrefix.IsNull() && !appNamePrefix.IsUnknown() {
-		state.AppName = appNamePrefix
-	}
 
 	diags = resp.State.Set(ctx, state)
 	resp.Diagnostics.Append(diags...)
@@ -322,10 +324,7 @@ func (r *MySQLResource) Update(ctx context.Context, req resource.UpdateRequest, 
 		return
 	}
 
-	// Preserve app_name from plan (user-provided prefix)
-	appNamePrefix := plan.AppName
 	r.mapMySQLToState(&plan, updatedMySQL)
-	plan.AppName = appNamePrefix
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)

@@ -17,7 +17,7 @@ Manages a MariaDB database instance in Dokploy.
 
 ### Required
 
-- `app_name` (String) Application name prefix for the MariaDB instance. Dokploy will append a random suffix.
+- `app_name_prefix` (String) Application name prefix for the MariaDB instance. Dokploy will append a random suffix to create the final app_name.
 - `database_name` (String) Name of the database to create.
 - `database_password` (String, Sensitive) Password for the database user.
 - `database_root_password` (String, Sensitive) Root password for the MariaDB instance.
@@ -40,6 +40,14 @@ Manages a MariaDB database instance in Dokploy.
 - `server_id` (String) ID of the server to deploy the MariaDB instance on.
 
 ### Read-Only
+- `app_name` (String) The actual application name used by Dokploy (includes server-generated suffix).
 
 - `application_status` (String) Current status of the MariaDB application (idle, running, done, error).
 - `id` (String) Unique identifier for the MariaDB instance.
+
+## Notes
+
+- The `app_name_prefix` you provide will have a random suffix appended by Dokploy to create the final `app_name`.
+- The computed `app_name` attribute contains the full name with the server-generated suffix. Use this when referencing the instance from other services.
+- Changing `app_name_prefix` will force recreation of the instance.
+- When importing, set `app_name_prefix` in your configuration (it cannot be determined from the imported state).

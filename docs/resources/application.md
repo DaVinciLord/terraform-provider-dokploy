@@ -457,7 +457,7 @@ resource "dokploy_application" "drop_app" {
 
 ### Optional
 
-- `app_name` (String) The app name used for Docker container naming. Auto-generated if not specified.
+- `app_name_prefix` (String) Application name prefix. Dokploy will append a random suffix to create the final app_name. Auto-generated if not specified.
 - `args` (String) Arguments to pass to the command.
 - `auto_deploy` (Boolean) Enable automatic deployment on Git push.
 - `bitbucket_branch` (String) Bitbucket branch to deploy from.
@@ -483,11 +483,11 @@ resource "dokploy_application" "drop_app" {
 - `custom_git_url` (String) Custom Git repository URL (for source_type 'git').
 - `deploy_on_create` (Boolean) Trigger a deployment after creating the application.
 - `description` (String) A description of the application.
-- `docker_build_stage` (String) Target stage for multi-stage Docker builds.
-- `docker_context_path` (String) Docker build context path.
+- `docker_build_stage` (String) Target stage for multi-stage Docker builds. Only valid when build_type is 'dockerfile'.
+- `docker_context_path` (String) Docker build context path. Only valid when build_type is 'dockerfile'.
 - `docker_image` (String) Docker image to use (for source_type 'docker'). Example: 'nginx:alpine'.
 - `dockerfile` (String) Raw Dockerfile content (for 'drop' source type or inline Dockerfile).
-- `dockerfile_path` (String) Path to the Dockerfile (relative to build path).
+- `dockerfile_path` (String) Path to the Dockerfile (relative to build path). Only valid when build_type is 'dockerfile'.
 - `drop_build_path` (String) Build path for 'drop' source type deployments.
 - `enable_submodules` (Boolean) Enable Git submodules support.
 - `enabled` (Boolean) Whether the application is enabled.
@@ -549,7 +549,7 @@ resource "dokploy_application" "drop_app" {
 - `stop_grace_period_swarm` (Number) Stop grace period in nanoseconds for Docker Swarm mode.
 - `subtitle` (String) Display subtitle for the application in the UI.
 - `title` (String) Display title for the application in the UI.
-- `traefik_config` (String) Custom Traefik configuration for the application. This allows you to define custom routing rules, middleware, and other Traefik-specific settings.
+- `traefik_config` (String) Traefik configuration for the application. Often managed by Dokploy (for example when domains are attached). Omit this attribute to leave the API value unchanged; set it only to push a custom config, or `""` to clear.
 - `trigger_type` (String) Trigger type for deployments: 'push' (default) or 'tag'.
 - `update_config_swarm` (String) Update configuration for Docker Swarm mode (JSON format).
 - `username` (String) Username for Docker registry authentication.
@@ -557,6 +557,7 @@ resource "dokploy_application" "drop_app" {
 
 ### Read-Only
 
+- `app_name` (String) The actual application name used by Dokploy for Docker container naming (includes server-generated suffix).
 - `application_status` (String) Current status of the application: idle, running, done, error.
 - `id` (String) The unique identifier of the application.
 

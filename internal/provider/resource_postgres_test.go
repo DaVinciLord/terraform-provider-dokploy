@@ -25,10 +25,13 @@ func TestAccPostgresResource(t *testing.T) {
 				Config: testAccPostgresResourceConfig("test-postgres-project", "test-postgres-env", "test-postgres", "testpgapp", "testdb", "testuser"),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("dokploy_postgres.test", "name", "test-postgres"),
+					resource.TestCheckResourceAttr("dokploy_postgres.test", "app_name_prefix", "testpgapp"),
+					resource.TestCheckResourceAttrSet("dokploy_postgres.test", "app_name"),
 					resource.TestCheckResourceAttrSet("dokploy_postgres.test", "id"),
 					resource.TestCheckResourceAttrSet("dokploy_postgres.test", "environment_id"),
 					resource.TestCheckResourceAttr("dokploy_postgres.test", "database_name", "testdb"),
 					resource.TestCheckResourceAttr("dokploy_postgres.test", "database_user", "testuser"),
+					resource.TestCheckResourceAttr("dokploy_postgres.test", "internal_port", "5432"),
 				),
 			},
 			// Update and Read testing
@@ -44,7 +47,7 @@ func TestAccPostgresResource(t *testing.T) {
 				ResourceName:            "dokploy_postgres.test",
 				ImportState:             true,
 				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"database_password", "app_name"},
+				ImportStateVerifyIgnore: []string{"database_password", "app_name_prefix", "deploy_on_create"},
 			},
 		},
 	})
@@ -69,7 +72,7 @@ resource "dokploy_environment" "test" {
 
 resource "dokploy_postgres" "test" {
   name              = "%s"
-  app_name          = "%s"
+  app_name_prefix   = "%s"
   database_name     = "%s"
   database_user     = "%s"
   database_password = "test_postgres_password_123"
@@ -97,7 +100,7 @@ resource "dokploy_environment" "test" {
 
 resource "dokploy_postgres" "test" {
   name              = "%s"
-  app_name          = "%s"
+  app_name_prefix   = "%s"
   database_name     = "%s"
   database_user     = "%s"
   database_password = "test_postgres_password_123"
@@ -162,7 +165,7 @@ resource "dokploy_environment" "test" {
 
 resource "dokploy_postgres" "test" {
   name               = "%s"
-  app_name           = "%s"
+  app_name_prefix    = "%s"
   database_name      = "%s"
   database_user      = "%s"
   database_password  = "test_postgres_password_123"

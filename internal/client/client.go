@@ -1025,7 +1025,7 @@ func (c *DokployClient) DeleteApplication(id string) error {
 	payload := map[string]string{
 		"applicationId": id,
 	}
-	_, err := c.doRequest("POST", "application.remove", payload)
+	_, err := c.doRequest("POST", "application.delete", payload)
 	return err
 }
 
@@ -1037,6 +1037,14 @@ func (c *DokployClient) DeployApplication(id string, serverId string) error {
 		payload["serverId"] = serverId
 	}
 	_, err := c.doRequest("POST", "application.deploy", payload)
+	return err
+}
+
+func (c *DokployClient) DeployPostgres(id string) error {
+	payload := map[string]interface{}{
+		"postgresId": id,
+	}
+	_, err := c.doRequest("POST", "postgres.deploy", payload)
 	return err
 }
 
@@ -1585,8 +1593,13 @@ func (c *DokployClient) CreateCompose(comp Compose) (*Compose, error) {
 		"environmentId": comp.EnvironmentID,
 		"name":          comp.Name,
 		"composeType":   composeType,
-		"appName":       comp.Name,
 	}
+
+	appName := comp.Name
+	if comp.AppName != "" {
+		appName = comp.AppName
+	}
+	payload["appName"] = appName
 
 	// Include serverId if provided
 	if comp.ServerID != "" {
@@ -3785,9 +3798,12 @@ func (c *DokployClient) UpdateBackup(backup Backup) (*Backup, error) {
 	if backup.KeepLatestCount > 0 {
 		payload["keepLatestCount"] = backup.KeepLatestCount
 	}
-	if len(backup.Metadata) > 0 {
-		payload["metadata"] = backup.Metadata
+
+	metadata := backup.Metadata
+	if metadata == nil {
+		metadata = map[string]string{}
 	}
+	payload["metadata"] = metadata
 
 	resp, err := c.doRequest("POST", "backup.update", payload)
 	if err != nil {
@@ -3986,6 +4002,7 @@ type Postgres struct {
 	CPUReservation    string `json:"cpuReservation"`
 	CPULimit          string `json:"cpuLimit"`
 	ExternalPort      int    `json:"externalPort"`
+	InternalPort      int    `json:"internalPort"`
 	EnvironmentID     string `json:"environmentId"`
 	ApplicationStatus string `json:"applicationStatus"`
 	Replicas          int    `json:"replicas"`

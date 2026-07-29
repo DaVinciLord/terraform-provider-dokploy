@@ -99,7 +99,7 @@ resource "dokploy_application" "app" {
 resource "dokploy_postgres" "db" {
   environment_id    = dokploy_environment.staging.id
   name              = "test-db"
-  app_name          = "testfulldb"
+  app_name_prefix   = "testfulldb"
   database_name     = "testdb"
   database_user     = "testuser"
   database_password = "securepassword123"

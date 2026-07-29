@@ -54,6 +54,7 @@ func TestAccApplicationResource(t *testing.T) {
 					"dockerfile_path", "docker_context_path", "docker_build_stage",
 					"deploy_on_create", // Not returned by API
 					"title",            // Not returned by API on import
+					"app_name_prefix",  // Config-only; cannot be derived from API
 				},
 			},
 		},
@@ -99,6 +100,7 @@ func TestAccApplicationResourceWithGit(t *testing.T) {
 					"branch", "owner", "repository", "github_id",
 					"dockerfile_path", "docker_context_path", "docker_build_stage",
 					"deploy_on_create",
+					"app_name_prefix",
 				},
 			},
 		},

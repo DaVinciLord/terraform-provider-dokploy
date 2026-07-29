@@ -17,7 +17,7 @@ Manages a MongoDB database instance in Dokploy.
 
 ### Required
 
-- `app_name` (String) Application name prefix for the MongoDB instance. Dokploy will append a random suffix.
+- `app_name_prefix` (String) Application name prefix for the MongoDB instance. Dokploy will append a random suffix to create the final app_name.
 - `database_password` (String, Sensitive) Password for the database user.
 - `database_user` (String) Database user name.
 - `environment_id` (String) ID of the environment to deploy the MongoDB instance in.
@@ -39,6 +39,14 @@ Manages a MongoDB database instance in Dokploy.
 - `server_id` (String) ID of the server to deploy the MongoDB instance on.
 
 ### Read-Only
+- `app_name` (String) The actual application name used by Dokploy (includes server-generated suffix).
 
 - `application_status` (String) Current status of the MongoDB application (idle, running, done, error).
 - `id` (String) Unique identifier for the MongoDB instance.
+
+## Notes
+
+- The `app_name_prefix` you provide will have a random suffix appended by Dokploy to create the final `app_name`.
+- The computed `app_name` attribute contains the full name with the server-generated suffix. Use this when referencing the instance from other services.
+- Changing `app_name_prefix` will force recreation of the instance.
+- When importing, set `app_name_prefix` in your configuration (it cannot be determined from the imported state).

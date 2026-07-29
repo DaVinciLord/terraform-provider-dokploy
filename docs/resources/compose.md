@@ -241,7 +241,7 @@ resource "dokploy_compose" "server_specific" {
 
 ### Optional
 
-- `app_name` (String) The app name used for Docker service naming. Auto-generated if not specified.
+- `app_name_prefix` (String) Application name prefix for Docker service naming. Dokploy will append a random suffix to create the final app_name. Auto-generated if not specified.
 - `auto_deploy` (Boolean) Enable automatic deployment on Git push. Defaults to API default (typically true).
 - `bitbucket_branch` (String) Bitbucket branch to deploy from.
 - `bitbucket_build_path` (String) Build path within the Bitbucket repository.
@@ -287,6 +287,7 @@ resource "dokploy_compose" "server_specific" {
 
 ### Read-Only
 
+- `app_name` (String) The actual app name used for Docker service naming (includes server-generated suffix).
 - `compose_status` (String) Current status of the compose stack: idle, running, done, or error.
 - `created_at` (String) Timestamp when the compose stack was created.
 - `id` (String) The unique identifier of the compose stack.

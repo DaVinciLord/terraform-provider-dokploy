@@ -44,7 +44,7 @@ func TestAccMySQLResource(t *testing.T) {
 				ResourceName:            "dokploy_mysql.test",
 				ImportState:             true,
 				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"database_password", "database_root_password", "app_name"},
+				ImportStateVerifyIgnore: []string{"database_password", "database_root_password", "app_name_prefix"},
 			},
 		},
 	})
@@ -69,7 +69,7 @@ resource "dokploy_environment" "test" {
 
 resource "dokploy_mysql" "test" {
   name                   = "%s"
-  app_name               = "%s"
+  app_name_prefix         = "%s"
   database_name          = "%s"
   database_user          = "%s"
   database_password      = "test_mysql_password_123"
@@ -98,7 +98,7 @@ resource "dokploy_environment" "test" {
 
 resource "dokploy_mysql" "test" {
   name                   = "%s"
-  app_name               = "%s"
+  app_name_prefix         = "%s"
   database_name          = "%s"
   database_user          = "%s"
   database_password      = "test_mysql_password_123"
