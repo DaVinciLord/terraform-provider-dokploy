@@ -27,6 +27,7 @@ type EnvironmentVariablesResource struct {
 type EnvironmentVariablesResourceModel struct {
 	ID            types.String `tfsdk:"id"`
 	ApplicationID types.String `tfsdk:"application_id"`
+	ComposeID     types.String `tfsdk:"compose_id"`
 	Variables     types.Map    `tfsdk:"variables"`
 	CreateEnvFile types.Bool   `tfsdk:"create_env_file"`
 }
@@ -37,13 +38,19 @@ func (r *EnvironmentVariablesResource) Metadata(_ context.Context, req resource.
 
 func (r *EnvironmentVariablesResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages all environment variables for a Dokploy application as a single resource.",
+		Description: "Manages all environment variables for a Dokploy application or compose stack as a single resource. " +
+			"Exactly one of application_id or compose_id must be set.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed: true,
 			},
 			"application_id": schema.StringAttribute{
-				Required: true,
+				Optional:    true,
+				Description: "Application ID. Mutually exclusive with compose_id.",
+			},
+			"compose_id": schema.StringAttribute{
+				Optional:    true,
+				Description: "Compose stack ID. Mutually exclusive with application_id.",
 			},
 			"variables": schema.MapAttribute{
 				Required:    true,
@@ -71,11 +78,43 @@ func (r *EnvironmentVariablesResource) Configure(_ context.Context, req resource
 	r.client = client
 }
 
+func (m EnvironmentVariablesResourceModel) targetID() (kind, id string, err error) {
+	appSet := !m.ApplicationID.IsNull() && !m.ApplicationID.IsUnknown() && m.ApplicationID.ValueString() != ""
+	composeSet := !m.ComposeID.IsNull() && !m.ComposeID.IsUnknown() && m.ComposeID.ValueString() != ""
+	switch {
+	case appSet && composeSet:
+		return "", "", fmt.Errorf("exactly one of application_id or compose_id must be set, not both")
+	case appSet:
+		return "application", m.ApplicationID.ValueString(), nil
+	case composeSet:
+		return "compose", m.ComposeID.ValueString(), nil
+	default:
+		return "", "", fmt.Errorf("exactly one of application_id or compose_id must be set")
+	}
+}
+
+func (r *EnvironmentVariablesResource) updateEnv(kind, id string, updateFn func(map[string]string), createEnvFile *bool) error {
+	switch kind {
+	case "application":
+		return r.client.UpdateApplicationEnv(id, updateFn, createEnvFile)
+	case "compose":
+		return r.client.UpdateComposeEnv(id, updateFn, createEnvFile)
+	default:
+		return fmt.Errorf("unknown environment variables target kind %q", kind)
+	}
+}
+
 func (r *EnvironmentVariablesResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan EnvironmentVariablesResourceModel
 	diags := req.Plan.Get(ctx, &plan)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	kind, targetID, err := plan.targetID()
+	if err != nil {
+		resp.Diagnostics.AddError("Invalid configuration", err.Error())
 		return
 	}
 
@@ -86,7 +125,7 @@ func (r *EnvironmentVariablesResource) Create(ctx context.Context, req resource.
 		return
 	}
 
-	err := r.client.UpdateApplicationEnv(plan.ApplicationID.ValueString(), func(m map[string]string) {
+	err = r.updateEnv(kind, targetID, func(m map[string]string) {
 		for k, v := range envMap {
 			m[k] = v
 		}
@@ -97,7 +136,7 @@ func (r *EnvironmentVariablesResource) Create(ctx context.Context, req resource.
 		return
 	}
 
-	plan.ID = plan.ApplicationID
+	plan.ID = types.StringValue(targetID)
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
@@ -111,22 +150,42 @@ func (r *EnvironmentVariablesResource) Read(ctx context.Context, req resource.Re
 		return
 	}
 
-	app, err := r.client.GetApplication(state.ApplicationID.ValueString())
+	kind, targetID, err := state.targetID()
 	if err != nil {
-		if strings.Contains(err.Error(), "Not Found") || strings.Contains(err.Error(), "404") {
-			resp.State.RemoveResource(ctx)
-			return
-		}
-		resp.Diagnostics.AddError("Error reading application", err.Error())
+		resp.Diagnostics.AddError("Invalid state", err.Error())
 		return
 	}
 
-	envMap := client.ParseEnv(app.Env)
+	var envStr string
+	switch kind {
+	case "application":
+		app, err := r.client.GetApplication(targetID)
+		if err != nil {
+			if strings.Contains(err.Error(), "Not Found") || strings.Contains(err.Error(), "404") {
+				resp.State.RemoveResource(ctx)
+				return
+			}
+			resp.Diagnostics.AddError("Error reading application", err.Error())
+			return
+		}
+		envStr = app.Env
+	case "compose":
+		comp, err := r.client.GetCompose(targetID)
+		if err != nil {
+			if strings.Contains(err.Error(), "Not Found") || strings.Contains(err.Error(), "404") {
+				resp.State.RemoveResource(ctx)
+				return
+			}
+			resp.Diagnostics.AddError("Error reading compose", err.Error())
+			return
+		}
+		envStr = comp.Env
+	}
+
+	envMap := client.ParseEnv(envStr)
 	state.Variables, diags = types.MapValueFrom(ctx, types.StringType, envMap)
 	resp.Diagnostics.Append(diags...)
-
-	// The CreateEnvFile attribute is not stored in the API, so we keep the configured value.
-	// If it's not configured, Terraform will use the default.
+	state.ID = types.StringValue(targetID)
 
 	diags = resp.State.Set(ctx, state)
 	resp.Diagnostics.Append(diags...)
@@ -142,6 +201,12 @@ func (r *EnvironmentVariablesResource) Update(ctx context.Context, req resource.
 		return
 	}
 
+	kind, targetID, err := plan.targetID()
+	if err != nil {
+		resp.Diagnostics.AddError("Invalid configuration", err.Error())
+		return
+	}
+
 	envMap := make(map[string]string)
 	diags = plan.Variables.ElementsAs(ctx, &envMap, false)
 	resp.Diagnostics.Append(diags...)
@@ -149,8 +214,7 @@ func (r *EnvironmentVariablesResource) Update(ctx context.Context, req resource.
 		return
 	}
 
-	err := r.client.UpdateApplicationEnv(plan.ApplicationID.ValueString(), func(m map[string]string) {
-		// Clear existing vars and set new ones
+	err = r.updateEnv(kind, targetID, func(m map[string]string) {
 		for k := range m {
 			delete(m, k)
 		}
@@ -164,7 +228,7 @@ func (r *EnvironmentVariablesResource) Update(ctx context.Context, req resource.
 		return
 	}
 
-	plan.ID = plan.ApplicationID
+	plan.ID = types.StringValue(targetID)
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
@@ -178,7 +242,13 @@ func (r *EnvironmentVariablesResource) Delete(ctx context.Context, req resource.
 		return
 	}
 
-	err := r.client.UpdateApplicationEnv(state.ApplicationID.ValueString(), func(m map[string]string) {
+	kind, targetID, err := state.targetID()
+	if err != nil {
+		resp.Diagnostics.AddError("Invalid state", err.Error())
+		return
+	}
+
+	err = r.updateEnv(kind, targetID, func(m map[string]string) {
 		for k := range m {
 			delete(m, k)
 		}
@@ -194,10 +264,17 @@ func (r *EnvironmentVariablesResource) Delete(ctx context.Context, req resource.
 }
 
 func (r *EnvironmentVariablesResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// The import ID is the application_id
-	applicationID := req.ID
+	// Import ID formats:
+	//   application: <application-id>
+	//   compose:     compose:<compose-id>
+	id := req.ID
+	if strings.HasPrefix(id, "compose:") {
+		composeID := strings.TrimPrefix(id, "compose:")
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), composeID)...)
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("compose_id"), composeID)...)
+		return
+	}
 
-	// Set both id and application_id to the same value
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), applicationID)...)
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("application_id"), applicationID)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), id)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("application_id"), id)...)
 }
