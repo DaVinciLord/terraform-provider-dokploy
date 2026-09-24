@@ -2660,6 +2660,56 @@ func (c *DokployClient) UpdateApplicationEnv(appID string, updateFn func(envMap 
 	return lastErr
 }
 
+// UpdateComposeEnv replaces environment variables on a compose stack via compose.saveEnvironment.
+func (c *DokployClient) UpdateComposeEnv(composeID string, updateFn func(envMap map[string]string), createEnvFile *bool) error {
+	var lastErr error
+	for i := 0; i < 5; i++ {
+		comp, err := c.GetCompose(composeID)
+		if err != nil {
+			return err
+		}
+
+		envMap := ParseEnv(comp.Env)
+		originalEnvStr := comp.Env
+
+		updateFn(envMap)
+
+		newEnvStr := formatEnv(envMap)
+
+		if newEnvStr == originalEnvStr {
+			return nil
+		}
+
+		payload := map[string]interface{}{
+			"composeId":     composeID,
+			"env":           newEnvStr,
+			"createEnvFile": false,
+		}
+		if createEnvFile != nil {
+			payload["createEnvFile"] = *createEnvFile
+		}
+
+		_, err = c.doRequest("POST", "compose.saveEnvironment", payload)
+		if err != nil {
+			lastErr = err
+			time.Sleep(time.Duration(100*(i+1)) * time.Millisecond)
+			continue
+		}
+
+		verifyComp, err := c.GetCompose(composeID)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to verify compose environment update: %w", err)
+			time.Sleep(time.Duration(100*(i+1)) * time.Millisecond)
+			continue
+		}
+		if verifyComp.Env == newEnvStr {
+			return nil
+		}
+		lastErr = fmt.Errorf("compose environment update conflict, retrying")
+	}
+	return lastErr
+}
+
 func (c *DokployClient) CreateVariable(appID, key, value, scope string, createEnvFile *bool) (*EnvironmentVariable, error) {
 	err := c.UpdateApplicationEnv(appID, func(envMap map[string]string) {
 		envMap[key] = value

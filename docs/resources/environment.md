@@ -44,5 +44,5 @@ resource "dokploy_environment" "production" {
 Import is supported using the following syntax:
 
 ```shell
-terraform import dokploy_environment.production "environment-id-123"
+terraform import dokploy_environment.production "project-id-123:environment-id-123"
 ```

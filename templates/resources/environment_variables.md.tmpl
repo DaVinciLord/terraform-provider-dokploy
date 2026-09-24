@@ -2,23 +2,38 @@
 page_title: "{{.Name}} {{.Type}} - {{.ProviderName}}"
 subcategory: ""
 description: |-
-  Manages all environment variables for a Dokploy application as a single resource.
+  Manages all environment variables for a Dokploy application or compose stack as a single resource.
 ---
 
 # {{.Name}} ({{.Type}})
 
-Manages all environment variables for a Dokploy application as a single resource.
+Manages all environment variables for a Dokploy application or compose stack as a single resource. Exactly one of `application_id` or `compose_id` must be set.
 
 ## Example Usage
+
+### Application
 
 ```terraform
 resource "dokploy_environment_variables" "myapp_env" {
   application_id = dokploy_application.myapp.id
-  
+
   variables = {
     NODE_ENV     = "production"
     PORT         = "3000"
     DATABASE_URL = "postgresql://user:pass@db:5432/mydb"
+  }
+}
+```
+
+### Compose
+
+```terraform
+resource "dokploy_environment_variables" "stack_env" {
+  compose_id = dokploy_compose.stack.id
+
+  variables = {
+    DATABASE_PASSWORD = var.db_password
+    DJANGO_SECRET_KEY = var.django_secret
   }
 }
 ```
@@ -30,5 +45,9 @@ resource "dokploy_environment_variables" "myapp_env" {
 Import is supported using the following syntax:
 
 ```shell
+# Application
 terraform import dokploy_environment_variables.myapp_env "application-id-123"
+
+# Compose
+terraform import dokploy_environment_variables.stack_env "compose:compose-id-123"
 ```
