@@ -1049,6 +1049,14 @@ func (c *DokployClient) DeployPostgres(id string) error {
 	return err
 }
 
+func (c *DokployClient) DeployRedis(id string) error {
+	payload := map[string]interface{}{
+		"redisId": id,
+	}
+	_, err := c.doRequest("POST", "redis.deploy", payload)
+	return err
+}
+
 func (c *DokployClient) RedeployApplication(id string) error {
 	payload := map[string]interface{}{
 		"applicationId": id,

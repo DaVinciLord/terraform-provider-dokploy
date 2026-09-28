@@ -45,6 +45,7 @@ type RedisResourceModel struct {
 	ApplicationStatus types.String `tfsdk:"application_status"`
 	Replicas          types.Int64  `tfsdk:"replicas"`
 	ServerID          types.String `tfsdk:"server_id"`
+	DeployOnCreate    types.Bool   `tfsdk:"deploy_on_create"`
 }
 
 func (r *RedisResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -153,6 +154,10 @@ func (r *RedisResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
+			},
+			"deploy_on_create": schema.BoolAttribute{
+				Optional:    true,
+				Description: "Trigger a deployment after creating the Redis instance.",
 			},
 		},
 	}
@@ -278,6 +283,12 @@ func (r *RedisResource) Create(ctx context.Context, req resource.CreateRequest, 
 	}
 	if !plan.ServerID.IsNull() || createdRedis.ServerID != "" {
 		plan.ServerID = types.StringValue(createdRedis.ServerID)
+	}
+
+	if !plan.DeployOnCreate.IsNull() && plan.DeployOnCreate.ValueBool() {
+		if err := r.client.DeployRedis(createdRedis.RedisID); err != nil {
+			resp.Diagnostics.AddWarning("Deployment Trigger Failed", fmt.Sprintf("Redis instance created but deployment failed to trigger: %s", err.Error()))
+		}
 	}
 
 	diags = resp.State.Set(ctx, plan)
