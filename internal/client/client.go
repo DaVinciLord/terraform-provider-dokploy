@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 )
@@ -2779,9 +2780,15 @@ func ParseEnv(env string) map[string]string {
 }
 
 func formatEnv(m map[string]string) string {
-	var lines []string
-	for k, v := range m {
-		lines = append(lines, fmt.Sprintf("%s=%s", k, v))
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	lines := make([]string, 0, len(keys))
+	for _, k := range keys {
+		lines = append(lines, fmt.Sprintf("%s=%s", k, m[k]))
 	}
 	return strings.Join(lines, "\n")
 }
