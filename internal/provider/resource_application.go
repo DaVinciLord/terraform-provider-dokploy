@@ -24,6 +24,7 @@ import (
 var _ resource.Resource = &ApplicationResource{}
 var _ resource.ResourceWithImportState = &ApplicationResource{}
 var _ resource.ResourceWithValidateConfig = &ApplicationResource{}
+var _ resource.ResourceWithModifyPlan = &ApplicationResource{}
 
 func NewApplicationResource() resource.Resource {
 	return &ApplicationResource{}
@@ -423,11 +424,13 @@ func (r *ApplicationResource) Schema(_ context.Context, _ resource.SchemaRequest
 			"build_type": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Description: "Build type: dockerfile, heroku_buildpacks, paketo_buildpacks, nixpacks, static, or railpack.",
+				Description: "Build type: dockerfile, heroku_buildpacks, paketo_buildpacks, nixpacks, static, or railpack. Ignored for source_type=docker (Dokploy default is kept).",
 				Validators: []validator.String{
 					stringvalidator.OneOf("dockerfile", "heroku_buildpacks", "paketo_buildpacks", "nixpacks", "static", "railpack"),
 				},
-				Default: stringdefault.StaticString("nixpacks"),
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"dockerfile_path": schema.StringAttribute{
 				Optional:    true,
@@ -729,9 +732,18 @@ func (r *ApplicationResource) ValidateConfig(ctx context.Context, req resource.V
 		return
 	}
 
+	sourceType := config.SourceType.ValueString()
+	if config.SourceType.IsNull() || config.SourceType.IsUnknown() {
+		sourceType = inferSourceType(&config).ValueString()
+	}
+
 	buildType := config.BuildType.ValueString()
 	if config.BuildType.IsNull() || config.BuildType.IsUnknown() {
-		// Schema default is nixpacks when unset.
+		if sourceType == "docker" {
+			// build_type is unmanaged for docker images.
+			return
+		}
+		// Non-docker default applied in ModifyPlan.
 		buildType = "nixpacks"
 	}
 
@@ -760,6 +772,42 @@ func (r *ApplicationResource) ValidateConfig(ctx context.Context, req resource.V
 			"docker_build_stage can only be set when build_type is \"dockerfile\".",
 		)
 	}
+}
+
+// ModifyPlan defaults build_type for buildable sources, and leaves it unknown
+// for docker so Terraform accepts whatever Dokploy stores (railpack, etc.).
+func (r *ApplicationResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+
+	var config, plan ApplicationResourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Explicit build_type in HCL wins.
+	if !config.BuildType.IsNull() && !config.BuildType.IsUnknown() {
+		return
+	}
+
+	sourceType := plan.SourceType.ValueString()
+	if plan.SourceType.IsNull() || plan.SourceType.IsUnknown() {
+		sourceType = inferSourceType(&plan).ValueString()
+	}
+
+	if sourceType == "docker" {
+		// Unmanaged: accept API value on create; keep state on update.
+		if req.State.Raw.IsNull() {
+			plan.BuildType = types.StringUnknown()
+		}
+	} else if plan.BuildType.IsNull() || plan.BuildType.IsUnknown() {
+		plan.BuildType = types.StringValue("nixpacks")
+	}
+
+	resp.Diagnostics.Append(resp.Plan.Set(ctx, &plan)...)
 }
 
 func (r *ApplicationResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -803,8 +851,10 @@ func (r *ApplicationResource) Create(ctx context.Context, req resource.CreateReq
 		return
 	}
 
-	// 3. Save build type settings if applicable (non-docker source types)
-	if plan.SourceType.ValueString() != "docker" {
+	// 3. Save build type only when planned (non-docker default or explicit HCL).
+	// For source_type=docker with unset build_type, the plan is unknown and we
+	// keep Dokploy's value after read-back.
+	if !plan.BuildType.IsNull() && !plan.BuildType.IsUnknown() {
 		if err := r.saveBuildType(createdApp.ID, &plan); err != nil {
 			resp.Diagnostics.AddError("Error saving build type", err.Error())
 			return
@@ -928,9 +978,8 @@ func (r *ApplicationResource) Update(ctx context.Context, req resource.UpdateReq
 		return
 	}
 
-	// 2. Update build type if changed (for non-docker source types)
-	sourceType := plan.SourceType.ValueString()
-	if sourceType != "docker" {
+	// 2. Save build type only when known in the plan (see ModifyPlan).
+	if !plan.BuildType.IsNull() && !plan.BuildType.IsUnknown() {
 		if err := r.saveBuildType(appID, &plan); err != nil {
 			resp.Diagnostics.AddError("Error saving build type", err.Error())
 			return
