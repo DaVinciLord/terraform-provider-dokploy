@@ -2542,7 +2542,7 @@ func (c *DokployClient) DeleteDomain(id string) error {
 	payload := map[string]string{
 		"domainId": id,
 	}
-	_, err := c.doRequest("POST", "domain.remove", payload)
+	_, err := c.doRequest("POST", "domain.delete", payload)
 	return err
 }
 
