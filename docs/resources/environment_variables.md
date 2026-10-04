@@ -43,6 +43,8 @@ resource "dokploy_environment_variables" "stack_env" {
 
 ### Optional
 
+- `redeploy_on_update` (Boolean) Deploy after creating or updating the environment variables. Defaults to false. Configure routes first using `depends_on` when needed. No deployment is triggered during read, import, delete, or an unchanged plan. A trigger error fails the operation; if variables were already saved, retry deployment explicitly after correcting the cause.
+
 - `application_id` (String) Application ID. Mutually exclusive with compose_id.
 - `compose_id` (String) Compose stack ID. Mutually exclusive with application_id.
 - `create_env_file` (Boolean)

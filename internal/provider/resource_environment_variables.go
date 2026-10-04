@@ -25,11 +25,12 @@ type EnvironmentVariablesResource struct {
 }
 
 type EnvironmentVariablesResourceModel struct {
-	ID            types.String `tfsdk:"id"`
-	ApplicationID types.String `tfsdk:"application_id"`
-	ComposeID     types.String `tfsdk:"compose_id"`
-	Variables     types.Map    `tfsdk:"variables"`
-	CreateEnvFile types.Bool   `tfsdk:"create_env_file"`
+	ID               types.String `tfsdk:"id"`
+	ApplicationID    types.String `tfsdk:"application_id"`
+	ComposeID        types.String `tfsdk:"compose_id"`
+	Variables        types.Map    `tfsdk:"variables"`
+	CreateEnvFile    types.Bool   `tfsdk:"create_env_file"`
+	RedeployOnUpdate types.Bool   `tfsdk:"redeploy_on_update"`
 }
 
 func (r *EnvironmentVariablesResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -56,6 +57,10 @@ func (r *EnvironmentVariablesResource) Schema(_ context.Context, _ resource.Sche
 				Required:    true,
 				ElementType: types.StringType,
 				Sensitive:   true,
+			},
+			"redeploy_on_update": schema.BoolAttribute{
+				Optional:    true,
+				Description: "Deploy the application or compose after creating or updating its environment variables. Defaults to false. Dependencies must configure routes before this resource.",
 			},
 			"create_env_file": schema.BoolAttribute{
 				Optional: true,
@@ -104,6 +109,17 @@ func (r *EnvironmentVariablesResource) updateEnv(kind, id string, updateFn func(
 	}
 }
 
+func (r *EnvironmentVariablesResource) deploy(kind, id string) error {
+	switch kind {
+	case "application":
+		return r.client.DeployApplication(id, "")
+	case "compose":
+		return r.client.DeployCompose(id, "")
+	default:
+		return fmt.Errorf("unknown deployment target kind %q", kind)
+	}
+}
+
 func (r *EnvironmentVariablesResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan EnvironmentVariablesResourceModel
 	diags := req.Plan.Get(ctx, &plan)
@@ -134,6 +150,13 @@ func (r *EnvironmentVariablesResource) Create(ctx context.Context, req resource.
 	if err != nil {
 		resp.Diagnostics.AddError("Error creating environment variables", err.Error())
 		return
+	}
+
+	if plan.RedeployOnUpdate.ValueBool() {
+		if err := r.deploy(kind, targetID); err != nil {
+			resp.Diagnostics.AddError("Deployment trigger failed", "Environment variables were saved, but deployment failed. Retry the deployment after correcting the cause.")
+			return
+		}
 	}
 
 	plan.ID = types.StringValue(targetID)
@@ -226,6 +249,13 @@ func (r *EnvironmentVariablesResource) Update(ctx context.Context, req resource.
 	if err != nil {
 		resp.Diagnostics.AddError("Error updating environment variables", err.Error())
 		return
+	}
+
+	if plan.RedeployOnUpdate.ValueBool() {
+		if err := r.deploy(kind, targetID); err != nil {
+			resp.Diagnostics.AddError("Deployment trigger failed", "Environment variables were saved, but deployment failed. Retry the deployment after correcting the cause.")
+			return
+		}
 	}
 
 	plan.ID = types.StringValue(targetID)
