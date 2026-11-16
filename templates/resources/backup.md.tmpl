@@ -24,6 +24,45 @@ resource "dokploy_backup" "daily" {
 }
 ```
 
+### PostgreSQL Compose Backup
+
+```terraform
+resource "dokploy_backup" "compose_postgres" {
+  backup_type       = "compose"
+  compose_id        = dokploy_compose.app.id
+  service_name      = "db"
+  database_type     = "postgres"
+  database_user     = "postgres"
+  database          = "app"
+  destination_id    = dokploy_destination.s3.id
+  schedule          = "0 2 * * *"
+  prefix            = "database"
+  keep_latest_count = 30
+}
+```
+
+`database_user` sends `metadata.postgres.databaseUser` to Dokploy on create and
+update, and is refreshed from that nested API field. It is only supported for
+`backup_type = "compose"` with `database_type = "postgres"` (the default compose
+database type). Use the role configured by your PostgreSQL container.
+
+The legacy `metadata` map remains supported for string values alongside
+`database_user`; do not set its `postgres` key when using `database_user`.
+Nested API fields are excluded from this string map. MySQL compose backups need
+`metadata.mysql.databaseRootPassword`; MariaDB and MongoDB need
+`metadata.<database_type>.databaseUser` and `databasePassword`. Those compose
+credential configurations are currently unsupported by this provider.
+
+### Existing Schedules and Rollback
+
+Rebuild the local fork binary before using `database_user` with development
+overrides. Adding the attribute updates an existing schedule in place without
+changing its resource address or requiring a state migration. Review a saved
+plan before applying, then run one manual backup and verify the remote dump.
+Removing `database_user` clears its generated credentials on the next update;
+when rolling back to an older binary, restore the user in Dokploy before
+relying on scheduled compose backups.
+
 {{ .SchemaMarkdown | trimspace }}
 
 ## Import

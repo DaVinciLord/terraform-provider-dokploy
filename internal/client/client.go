@@ -3715,23 +3715,23 @@ func (c *DokployClient) ListDestinations() ([]Destination, error) {
 
 // Backup represents a scheduled backup configuration.
 type Backup struct {
-	BackupID        string            `json:"backupId"`
-	AppName         string            `json:"appName"`
-	Schedule        string            `json:"schedule"`
-	Enabled         bool              `json:"enabled"`
-	Database        string            `json:"database"`
-	Prefix          string            `json:"prefix"`
-	DestinationID   string            `json:"destinationId"`
-	KeepLatestCount int               `json:"keepLatestCount"`
-	BackupType      string            `json:"backupType"`   // "database" or "compose"
-	DatabaseType    string            `json:"databaseType"` // "postgres", "mysql", "mariadb", "mongo"
-	PostgresID      string            `json:"postgresId"`
-	MysqlID         string            `json:"mysqlId"`
-	MariadbID       string            `json:"mariadbId"`
-	MongoID         string            `json:"mongoId"`
-	ComposeID       string            `json:"composeId"`
-	ServiceName     string            `json:"serviceName"`
-	Metadata        map[string]string `json:"metadata,omitempty"`
+	BackupID        string         `json:"backupId"`
+	AppName         string         `json:"appName"`
+	Schedule        string         `json:"schedule"`
+	Enabled         bool           `json:"enabled"`
+	Database        string         `json:"database"`
+	Prefix          string         `json:"prefix"`
+	DestinationID   string         `json:"destinationId"`
+	KeepLatestCount int            `json:"keepLatestCount"`
+	BackupType      string         `json:"backupType"`   // "database" or "compose"
+	DatabaseType    string         `json:"databaseType"` // "postgres", "mysql", "mariadb", "mongo"
+	PostgresID      string         `json:"postgresId"`
+	MysqlID         string         `json:"mysqlId"`
+	MariadbID       string         `json:"mariadbId"`
+	MongoID         string         `json:"mongoId"`
+	ComposeID       string         `json:"composeId"`
+	ServiceName     string         `json:"serviceName"`
+	Metadata        map[string]any `json:"metadata,omitempty"`
 }
 
 func (c *DokployClient) CreateBackup(backup Backup) (*Backup, error) {
@@ -3866,7 +3866,7 @@ func (c *DokployClient) UpdateBackup(backup Backup) (*Backup, error) {
 
 	metadata := backup.Metadata
 	if metadata == nil {
-		metadata = map[string]string{}
+		metadata = map[string]any{}
 	}
 	payload["metadata"] = metadata
 

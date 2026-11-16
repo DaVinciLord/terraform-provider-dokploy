@@ -7,6 +7,7 @@ import (
 
 	"github.com/ahmedali6/terraform-provider-dokploy/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -21,6 +22,7 @@ import (
 
 var _ resource.Resource = &BackupResource{}
 var _ resource.ResourceWithImportState = &BackupResource{}
+var _ resource.ResourceWithValidateConfig = &BackupResource{}
 
 func NewBackupResource() resource.Resource {
 	return &BackupResource{}
@@ -36,6 +38,7 @@ type BackupResourceModel struct {
 	BackupType      types.String `tfsdk:"backup_type"`
 	DatabaseID      types.String `tfsdk:"database_id"`
 	DatabaseType    types.String `tfsdk:"database_type"`
+	DatabaseUser    types.String `tfsdk:"database_user"`
 	ComposeID       types.String `tfsdk:"compose_id"`
 	ServiceName     types.String `tfsdk:"service_name"`
 	Schedule        types.String `tfsdk:"schedule"`
@@ -94,6 +97,10 @@ func (r *BackupResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
+			"database_user": schema.StringAttribute{
+				Optional:    true,
+				Description: "PostgreSQL user for compose backups. Only supported with backup_type = compose and database_type = postgres (the default for compose backups).",
+			},
 			"compose_id": schema.StringAttribute{
 				Optional:    true,
 				Description: "ID of the compose to backup. Required when backup_type is 'compose'.",
@@ -132,7 +139,7 @@ func (r *BackupResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 			"metadata": schema.MapAttribute{
 				Optional:    true,
 				ElementType: types.StringType,
-				Description: "Metadata for the backup configuration as key-value pairs.",
+				Description: "Legacy string metadata as key-value pairs. For PostgreSQL compose credentials, use database_user; nested API metadata is not exposed in this map.",
 			},
 		},
 	}
@@ -195,15 +202,10 @@ func (r *BackupResource) Create(ctx context.Context, req resource.CreateRequest,
 		BackupType:      backupType,
 	}
 
-	// Set metadata if provided
-	if !plan.Metadata.IsNull() && !plan.Metadata.IsUnknown() {
-		metadataMap := make(map[string]string)
-		diags = plan.Metadata.ElementsAs(ctx, &metadataMap, false)
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-		backup.Metadata = metadataMap
+	backup.Metadata, diags = backupMetadata(ctx, plan)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
 	switch backupType {
@@ -304,12 +306,26 @@ func (r *BackupResource) Read(ctx context.Context, req resource.ReadRequest, res
 		}
 	}
 
-	// Read metadata if present
-	if len(backup.Metadata) > 0 {
-		state.Metadata, diags = types.MapValueFrom(ctx, types.StringType, backup.Metadata)
+	// Keep the legacy string map separate from Dokploy's nested credentials.
+	metadata := make(map[string]string)
+	for key, value := range backup.Metadata {
+		if value, ok := value.(string); ok {
+			metadata[key] = value
+		}
+	}
+	if len(metadata) > 0 || (!state.Metadata.IsNull() && len(state.Metadata.Elements()) == 0) {
+		state.Metadata, diags = types.MapValueFrom(ctx, types.StringType, metadata)
 		resp.Diagnostics.Append(diags...)
 	} else {
 		state.Metadata = types.MapNull(types.StringType)
+	}
+	state.DatabaseUser = types.StringNull()
+	if backup.BackupType == "compose" {
+		if credentials, ok := backup.Metadata[backup.DatabaseType].(map[string]any); ok {
+			if user, ok := credentials["databaseUser"].(string); ok {
+				state.DatabaseUser = types.StringValue(user)
+			}
+		}
 	}
 
 	diags = resp.State.Set(ctx, state)
@@ -339,15 +355,11 @@ func (r *BackupResource) Update(ctx context.Context, req resource.UpdateRequest,
 		KeepLatestCount: int(plan.KeepLatestCount.ValueInt64()),
 	}
 
-	metadataMap := make(map[string]string)
-	if !plan.Metadata.IsNull() && !plan.Metadata.IsUnknown() {
-		diags = plan.Metadata.ElementsAs(ctx, &metadataMap, false)
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
+	backup.Metadata, diags = backupMetadata(ctx, plan)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
-	backup.Metadata = metadataMap
 
 	// Set database type for the update API
 	if !plan.DatabaseType.IsNull() && plan.DatabaseType.ValueString() != "" {
@@ -401,4 +413,57 @@ func (r *BackupResource) Delete(ctx context.Context, req resource.DeleteRequest,
 
 func (r *BackupResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+}
+
+// ValidateConfig rejects credentials that Dokploy cannot use before any API call.
+func (r *BackupResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var config BackupResourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	resp.Diagnostics.Append(validateBackupDatabaseUser(config)...)
+}
+
+func validateBackupDatabaseUser(model BackupResourceModel) diag.Diagnostics {
+	var diags diag.Diagnostics
+	if model.DatabaseUser.IsNull() || model.DatabaseUser.IsUnknown() {
+		return diags
+	}
+	if !model.BackupType.IsUnknown() && model.BackupType.ValueString() != "compose" {
+		diags.AddAttributeError(path.Root("database_user"), "Invalid database_user", "database_user can only be set when backup_type is 'compose'.")
+	}
+	if !model.DatabaseType.IsUnknown() && !model.DatabaseType.IsNull() && model.DatabaseType.ValueString() != "postgres" {
+		diags.AddAttributeError(path.Root("database_user"), "Unsupported compose database credentials", "database_user currently supports only PostgreSQL compose backups. MySQL, MariaDB and MongoDB require additional credential fields that this provider does not support.")
+	}
+	if strings.TrimSpace(model.DatabaseUser.ValueString()) == "" {
+		diags.AddAttributeError(path.Root("database_user"), "Invalid database_user", "database_user must not be blank.")
+	}
+	if _, exists := model.Metadata.Elements()["postgres"]; exists {
+		diags.AddAttributeError(path.Root("metadata"), "Conflicting backup metadata", "metadata.postgres cannot be combined with database_user because Dokploy requires a nested postgres object.")
+	}
+	return diags
+}
+
+// Both writes use the same conversion so credentials and legacy metadata coexist.
+func backupMetadata(ctx context.Context, model BackupResourceModel) (map[string]any, diag.Diagnostics) {
+	diags := validateBackupDatabaseUser(model)
+	metadata := make(map[string]any)
+	if diags.HasError() {
+		return nil, diags
+	}
+	if !model.Metadata.IsNull() && !model.Metadata.IsUnknown() {
+		var legacy map[string]string
+		diags.Append(model.Metadata.ElementsAs(ctx, &legacy, false)...)
+		if diags.HasError() {
+			return nil, diags
+		}
+		for key, value := range legacy {
+			metadata[key] = value
+		}
+	}
+	if !model.DatabaseUser.IsNull() && !model.DatabaseUser.IsUnknown() {
+		metadata["postgres"] = map[string]any{"databaseUser": model.DatabaseUser.ValueString()}
+	}
+	return metadata, diags
 }
