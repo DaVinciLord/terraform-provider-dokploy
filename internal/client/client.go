@@ -3634,6 +3634,8 @@ func (c *DokployClient) CreateDestination(dest Destination) (*Destination, error
 		"bucket":          dest.Bucket,
 		"region":          dest.Region,
 		"endpoint":        dest.Endpoint,
+		// Required since Dokploy v0.31; the provider exposes no extra flags.
+		"additionalFlags": []string{},
 	}
 	if dest.ServerID != nil {
 		payload["serverId"] = *dest.ServerID
@@ -3675,6 +3677,8 @@ func (c *DokployClient) UpdateDestination(dest Destination) (*Destination, error
 		"bucket":          dest.Bucket,
 		"region":          dest.Region,
 		"endpoint":        dest.Endpoint,
+		// Required since Dokploy v0.31; the provider exposes no extra flags.
+		"additionalFlags": []string{},
 	}
 	if dest.ServerID != nil {
 		payload["serverId"] = *dest.ServerID
