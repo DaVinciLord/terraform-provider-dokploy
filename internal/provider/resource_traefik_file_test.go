@@ -54,6 +54,7 @@ func TestTraefikFileLifecycle(t *testing.T) {
 		t.Run("server="+serverID, func(t *testing.T) {
 			ctx := context.Background()
 			var remoteContent *string
+			var rejectRead bool
 			var calls []string
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 				calls = append(calls, req.Method+" "+req.URL.Path)
@@ -62,6 +63,10 @@ func TestTraefikFileLifecycle(t *testing.T) {
 					query := req.URL.Query()
 					if query.Get("path") != filePath || query.Get("serverId") != serverID || query.Has("serverId") != (serverID != "") {
 						t.Errorf("unexpected query: %s", req.URL.RawQuery)
+					}
+					if rejectRead {
+						w.WriteHeader(http.StatusForbidden)
+						return
 					}
 					_ = json.NewEncoder(w).Encode(remoteContent)
 				case "/settings.updateTraefikFile":
@@ -139,6 +144,20 @@ func TestTraefikFileLifecycle(t *testing.T) {
 				t.Fatalf("delete remote=%q, diagnostics=%v", *remoteContent, deleted.Diagnostics)
 			}
 
+			recreated := resource.CreateResponse{State: tfsdk.State{Schema: sr.Schema}}
+			r.Create(ctx, resource.CreateRequest{Plan: plan}, &recreated)
+			if recreated.Diagnostics.HasError() || *remoteContent != updated || !recreated.State.Raw.Equal(update.State.Raw) {
+				t.Fatalf("recreate remote=%q, diagnostics=%v", *remoteContent, recreated.Diagnostics)
+			}
+
+			similar := strings.TrimSuffix(tombstone, "\n")
+			remoteContent = &similar
+			duplicate = resource.CreateResponse{}
+			r.Create(ctx, resource.CreateRequest{Plan: plan}, &duplicate)
+			if !duplicate.Diagnostics.HasError() || !strings.Contains(duplicate.Diagnostics.Errors()[0].Detail(), "Import") {
+				t.Fatalf("expected import instruction for a non-exact placeholder, got %v", duplicate.Diagnostics)
+			}
+
 			remoteContent = nil
 			missing := resource.ReadResponse{State: update.State}
 			r.Read(ctx, resource.ReadRequest{State: update.State}, &missing)
@@ -146,9 +165,32 @@ func TestTraefikFileLifecycle(t *testing.T) {
 				t.Fatalf("expected state removal, got %v, diagnostics=%v", missing.State.Raw, missing.Diagnostics)
 			}
 
+			deleteMissing := resource.DeleteResponse{State: update.State}
+			r.Delete(ctx, resource.DeleteRequest{State: update.State}, &deleteMissing)
+			if deleteMissing.Diagnostics.HasError() || remoteContent != nil {
+				t.Fatalf("delete missing remote=%v, diagnostics=%v", remoteContent, deleteMissing.Diagnostics)
+			}
+
+			rejectRead = true
+			deleteDenied := resource.DeleteResponse{State: update.State}
+			r.Delete(ctx, resource.DeleteRequest{State: update.State}, &deleteDenied)
+			if !deleteDenied.Diagnostics.HasError() {
+				t.Fatal("expected a diagnostic when the read failed")
+			}
+
 			const get = "GET /settings.readTraefikFile"
 			const post = "POST /settings.updateTraefikFile"
-			if want := []string{get, post, get, get, post, post, get}; !reflect.DeepEqual(calls, want) {
+			want := []string{
+				get, post, // Create.
+				get,       // Reject an existing file.
+				get, post, // Read and update.
+				get, post, // Delete.
+				get, post, // Create over the exact removal comment.
+				get,      // Reject a non-exact removal comment.
+				get, get, // Read and delete when missing.
+				get, // Delete when the read fails.
+			}
+			if !reflect.DeepEqual(calls, want) {
 				t.Errorf("requests = %v, want %v", calls, want)
 			}
 		})

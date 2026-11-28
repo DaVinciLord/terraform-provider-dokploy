@@ -123,12 +123,12 @@ func (r *TraefikFileResource) Create(ctx context.Context, req resource.CreateReq
 		id = serverID + ":" + filePath
 	}
 
-	_, err := r.client.ReadTraefikFile(filePath, serverID)
+	content, err := r.client.ReadTraefikFile(filePath, serverID)
 	switch {
-	case err == nil:
+	case err == nil && content != removedTraefikFile:
 		resp.Diagnostics.AddError("Traefik file already exists", fmt.Sprintf("Import the existing file with ID %q before managing it with Terraform.", id))
 		return
-	case !errors.Is(err, client.ErrNotFound):
+	case err != nil && !errors.Is(err, client.ErrNotFound):
 		resp.Diagnostics.AddError("Error checking Traefik file", err.Error())
 		return
 	}
@@ -180,7 +180,16 @@ func (r *TraefikFileResource) Delete(ctx context.Context, req resource.DeleteReq
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	if err := r.client.UpdateTraefikFile(state.Path.ValueString(), state.ServerID.ValueString(), removedTraefikFile); err != nil {
+	filePath, serverID := state.Path.ValueString(), state.ServerID.ValueString()
+	_, err := r.client.ReadTraefikFile(filePath, serverID)
+	if errors.Is(err, client.ErrNotFound) {
+		return
+	}
+	if err != nil {
+		resp.Diagnostics.AddError("Error checking Traefik file before clearing it", err.Error())
+		return
+	}
+	if err := r.client.UpdateTraefikFile(filePath, serverID, removedTraefikFile); err != nil {
 		resp.Diagnostics.AddError("Error clearing Traefik file", err.Error())
 	}
 }

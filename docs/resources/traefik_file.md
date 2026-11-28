@@ -9,7 +9,7 @@ description: |-
 
 Manages a Traefik dynamic configuration file through Dokploy. Import existing files before managing them. The resource reads the file contents as returned by the API so changes made outside Terraform appear during refresh.
 
-Dokploy does not expose a delete endpoint for Traefik files. Destroy overwrites the file with a single comment, removing the configuration it provided. To reuse the same path, import the remaining file or remove it on the host first.
+Dokploy does not expose a delete endpoint for Traefik files. Destroy overwrites an existing file with a single comment, removing the configuration it provided. Destroy leaves an already missing file alone. To reuse a destroyed path, re-add it to the Terraform configuration. Create overwrites the exact comment left by destroy without requiring an import.
 
 ## Example Usage
 
