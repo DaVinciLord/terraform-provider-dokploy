@@ -1,0 +1,10 @@
+http:
+  routers:
+    example:
+      rule: Host(`example.com`)
+      service: example
+  services:
+    example:
+      loadBalancer:
+        servers:
+          - url: https://backend.example.com
