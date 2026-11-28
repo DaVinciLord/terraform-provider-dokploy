@@ -91,6 +91,7 @@ func (p *DokployProvider) Resources(_ context.Context) []func() resource.Resourc
 		NewMountResource,
 		NewPortResource,
 		NewRedirectResource,
+		NewTraefikFileResource,
 		NewRegistryResource,
 		NewDestinationResource,
 		NewBackupResource,
